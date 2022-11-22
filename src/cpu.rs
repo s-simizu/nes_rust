@@ -142,6 +142,37 @@ impl CPU {
         self.update_zero_and_negative_falgs(self.register_y.wrapping_add(1));
     }
 
+    fn adc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.register_a = self.add_to_register_a(self.mem_read(addr));
+        self.update_zero_and_negative_falgs(self.register_a);
+    }
+
+    fn add_to_register_a(&mut self, data: u8) -> u8{
+        let sum = self.register_a as u16
+            + data as u16
+            + if self.status.contains(CpuFlags::CARRY) {
+                1
+            } else {
+                0
+            };
+            let carry = sum > 0xff;
+            if carry {
+                self.status.insert(CpuFlags::CARRY);
+            } else {
+                self.status.remove(CpuFlags::CARRY);
+            }
+            let result = sum as u8;
+        // pos + pos or neg + neg && result is reversed
+        let overflow = !((self.register_a ^ data) > 0xfe) && (result > 0xfe) ^ carry;
+        if overflow {
+            self.status.insert(CpuFlags::OVERFLOW);
+        } else {
+            self.status.remove(CpuFlags::OVERFLOW);
+        }
+        result
+    }
+
     fn update_zero_and_negative_falgs(&mut self, result: u8) {
         if result == 0 {
             self.status.insert(CpuFlags::ZERO);
@@ -176,6 +207,7 @@ impl CPU {
                 0x86 | 0x96 | 0x8e => self.stx(&opcode.mode),
                 0x84 | 0x94 | 0x8c => self.sty(&opcode.mode),
                 0xe6 | 0xf6 | 0xee | 0xfe => self.inc(&opcode.mode),
+                0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => self.adc(&opcode.mode),
                 0xe8 => self.inx(),
                 0xc8 => self.iny(),
                 0xaa => self.tax(),
@@ -293,5 +325,28 @@ mod test {
         cpu.mem_write_u16(0x15, 0x1000);
         cpu.load_and_run(vec![0xa2, 0x05, 0xa1, 0x10, 0x00]);
         assert_eq!(cpu.register_a, 0x55);
+    }
+
+    #[test]
+    fn test_adc_zeropage() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0x01);
+        cpu.load_and_run(vec![0xa9, 0x01, 0x65, 0x10, 0x00]);
+        assert_eq!(cpu.register_a, 0x02);
+    }
+
+    #[test]
+    fn test_adc_flags() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa9, 0xff, 0x69, 0xff, 0x00]);
+        assert!(cpu.status.contains(CpuFlags::CARRY));
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(cpu.status.contains(CpuFlags::OVERFLOW));
+        assert!(cpu.status.contains(CpuFlags::NEGATIVE));
+        cpu.load_and_run(vec![0xa9, 0x7f, 0x69, 0x7f, 0x00]);
+        assert!(!cpu.status.contains(CpuFlags::CARRY));
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(cpu.status.contains(CpuFlags::OVERFLOW));
+        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
     }
 }
