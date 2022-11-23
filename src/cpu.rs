@@ -148,7 +148,7 @@ impl CPU {
         self.update_zero_and_negative_falgs(self.register_a);
     }
 
-    fn add_to_register_a(&mut self, data: u8) -> u8{
+    fn add_to_register_a(&mut self, data: u8) -> u8 {
         let sum = self.register_a as u16
             + data as u16
             + if self.status.contains(CpuFlags::CARRY) {
@@ -156,15 +156,16 @@ impl CPU {
             } else {
                 0
             };
-            let carry = sum > 0xff;
-            if carry {
-                self.status.insert(CpuFlags::CARRY);
-            } else {
-                self.status.remove(CpuFlags::CARRY);
-            }
-            let result = sum as u8;
-        // pos + pos or neg + neg && result is reversed
-        let overflow = !((self.register_a ^ data) > 0xfe) && (result > 0xfe) ^ carry;
+        let carry = sum > 0xff;
+        if carry {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
+        let result = sum as u8;
+        let is_same_sign = !(self.register_a ^ data) & 0b1000_0000 == 0b1000_0000;
+        let is_wrong_result = (sum & 0b1000_0000 == 0b1000_0000) ^ carry;
+        let overflow = is_same_sign && is_wrong_result;
         if overflow {
             self.status.insert(CpuFlags::OVERFLOW);
         } else {
@@ -200,14 +201,14 @@ impl CPU {
                 .expect(&format!("OpCode {:x} is not recognized", code));
 
             match code {
+                0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => self.adc(&opcode.mode),
                 0xa9 | 0xa5 | 0xb5 | 0xad | 0xbd | 0xb9 | 0xa1 | 0xb1 => self.lda(&opcode.mode),
+                0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => self.sta(&opcode.mode),
                 0xa2 | 0xa6 | 0xb6 | 0xae | 0xbe => self.ldx(&opcode.mode),
                 0xa0 | 0xa4 | 0xb4 | 0xac | 0xbc => self.ldy(&opcode.mode),
-                0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => self.sta(&opcode.mode),
+                0xe6 | 0xf6 | 0xee | 0xfe => self.inc(&opcode.mode),
                 0x86 | 0x96 | 0x8e => self.stx(&opcode.mode),
                 0x84 | 0x94 | 0x8c => self.sty(&opcode.mode),
-                0xe6 | 0xf6 | 0xee | 0xfe => self.inc(&opcode.mode),
-                0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => self.adc(&opcode.mode),
                 0xe8 => self.inx(),
                 0xc8 => self.iny(),
                 0xaa => self.tax(),
@@ -338,15 +339,15 @@ mod test {
     #[test]
     fn test_adc_flags() {
         let mut cpu = CPU::new();
-        cpu.load_and_run(vec![0xa9, 0xff, 0x69, 0xff, 0x00]);
+        cpu.load_and_run(vec![0xa9, 0x80, 0x69, 0x80, 0x00]);
         assert!(cpu.status.contains(CpuFlags::CARRY));
-        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(cpu.status.contains(CpuFlags::ZERO));
         assert!(cpu.status.contains(CpuFlags::OVERFLOW));
-        assert!(cpu.status.contains(CpuFlags::NEGATIVE));
+        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
         cpu.load_and_run(vec![0xa9, 0x7f, 0x69, 0x7f, 0x00]);
         assert!(!cpu.status.contains(CpuFlags::CARRY));
         assert!(!cpu.status.contains(CpuFlags::ZERO));
         assert!(cpu.status.contains(CpuFlags::OVERFLOW));
-        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
+        assert!(cpu.status.contains(CpuFlags::NEGATIVE));
     }
 }
