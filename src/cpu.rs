@@ -142,10 +142,117 @@ impl CPU {
         self.update_zero_and_negative_falgs(self.register_y.wrapping_add(1));
     }
 
+    fn and(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.register_a &= self.mem_read(addr);
+        self.update_zero_and_negative_falgs(self.register_a);
+    }
+
+    fn ora(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.register_a |= self.mem_read(addr);
+        self.update_zero_and_negative_falgs(self.register_a);
+    }
+
+    fn eor(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.register_a ^= self.mem_read(addr);
+        self.update_zero_and_negative_falgs(self.register_a);
+    }
+
     fn adc(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         self.register_a = self.add_to_register_a(self.mem_read(addr));
         self.update_zero_and_negative_falgs(self.register_a);
+    }
+
+    fn sbc(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let neg_value = !self.mem_read(addr) + 1;
+        self.register_a = self.add_to_register_a(neg_value);
+        self.update_zero_and_negative_falgs(self.register_a);
+    }
+
+    fn asl_accumulator(&mut self) {
+        let shifted = (self.register_a as u16) << 1;
+        self.adjust_carry_flag(shifted > 0xff);
+        self.register_a = shifted as u8;
+        self.update_zero_and_negative_falgs(self.register_a);
+    }
+
+    fn asl(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let shifted = (self.mem_read(addr) as u16) << 1;
+        self.adjust_carry_flag(shifted > 0xff);
+        self.mem_write(addr, shifted as u8);
+        self.update_zero_and_negative_falgs(self.mem_read(addr));
+    }
+
+    fn lsr_accumulator(&mut self) {
+        self.adjust_carry_flag(self.register_a & 1 == 1);
+        self.register_a >>= 1;
+        self.update_zero_and_negative_falgs(self.register_a);
+    }
+
+    fn lsr(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        self.adjust_carry_flag(value & 1 == 1);
+        self.mem_write(addr, value >> 1);
+        self.update_zero_and_negative_falgs(self.mem_read(addr));
+    }
+
+    fn rol_accumulator(&mut self) {
+        let old_carry = self.status.contains(CpuFlags::CARRY);
+        let mut shifted = (self.register_a as u16) << 1;
+        self.adjust_carry_flag(shifted > 0xff);
+        if old_carry {
+            shifted |= 1;
+        }
+        self.register_a = shifted as u8;
+        self.update_zero_and_negative_falgs(self.register_a);
+    }
+
+    fn rol(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let old_carry = self.status.contains(CpuFlags::CARRY);
+        let mut shifted = (self.register_a as u16) << 1;
+        self.adjust_carry_flag(shifted > 0xff);
+        if old_carry {
+            shifted |= 1;
+        }
+        self.mem_write(addr, shifted as u8);
+        self.update_zero_and_negative_falgs(self.mem_read(addr));
+    }
+
+    fn ror_accumulator(&mut self) {
+        let old_carry = self.status.contains(CpuFlags::CARRY);
+        self.adjust_carry_flag(self.register_a & 1 == 1);
+        self.register_a >>= 1;
+        if old_carry {
+            self.register_a |= 0b1000_0000;
+        }
+        self.update_zero_and_negative_falgs(self.register_a);
+    }
+
+    fn ror(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let old_carry = self.status.contains(CpuFlags::CARRY);
+        let mut value = self.mem_read(addr);
+        self.adjust_carry_flag(value & 1 == 1);
+        if old_carry {
+            value |= 0b1000_0000;
+        }
+        self.mem_write(addr, value);
+        self.update_zero_and_negative_falgs(self.mem_read(addr));
+    }
+
+    fn adjust_carry_flag(&mut self, carry: bool) {
+        if carry {
+            self.status.insert(CpuFlags::CARRY);
+        } else {
+            self.status.remove(CpuFlags::CARRY);
+        }
     }
 
     fn add_to_register_a(&mut self, data: u8) -> u8 {
@@ -157,14 +264,10 @@ impl CPU {
                 0
             };
         let carry = sum > 0xff;
-        if carry {
-            self.status.insert(CpuFlags::CARRY);
-        } else {
-            self.status.remove(CpuFlags::CARRY);
-        }
+        self.adjust_carry_flag(carry);
         let result = sum as u8;
-        let is_same_sign = !(self.register_a ^ data) & 0b1000_0000 == 0b1000_0000;
-        let is_wrong_result = (sum & 0b1000_0000 == 0b1000_0000) ^ carry;
+        let is_same_sign = !(self.register_a ^ data) >> 7 & 1 == 1;
+        let is_wrong_result = (sum >> 7 & 1 == 1) ^ carry;
         let overflow = is_same_sign && is_wrong_result;
         if overflow {
             self.status.insert(CpuFlags::OVERFLOW);
@@ -202,13 +305,25 @@ impl CPU {
 
             match code {
                 0x69 | 0x65 | 0x75 | 0x6d | 0x7d | 0x79 | 0x61 | 0x71 => self.adc(&opcode.mode),
+                0xe9 | 0xe5 | 0xf5 | 0xed | 0xfd | 0xf9 | 0xe1 | 0xf1 => self.sbc(&opcode.mode),
                 0xa9 | 0xa5 | 0xb5 | 0xad | 0xbd | 0xb9 | 0xa1 | 0xb1 => self.lda(&opcode.mode),
+                0x29 | 0x25 | 0x35 | 0x2d | 0x3d | 0x39 | 0x21 | 0x31 => self.and(&opcode.mode),
+                0x09 | 0x05 | 0x15 | 0x0d | 0x1d | 0x19 | 0x01 | 0x11 => self.ora(&opcode.mode),
+                0x49 | 0x45 | 0x55 | 0x4d | 0x5d | 0x59 | 0x41 | 0x51 => self.eor(&opcode.mode),
                 0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => self.sta(&opcode.mode),
                 0xa2 | 0xa6 | 0xb6 | 0xae | 0xbe => self.ldx(&opcode.mode),
                 0xa0 | 0xa4 | 0xb4 | 0xac | 0xbc => self.ldy(&opcode.mode),
+                0x06 | 0x16 | 0x0e | 0x1e => self.asl(&opcode.mode),
+                0x46 | 0x56 | 0x4e | 0x5e => self.lsr(&opcode.mode),
+                0x26 | 0x36 | 0x2e | 0x3e => self.rol(&opcode.mode),
+                0x66 | 0x76 | 0x6e | 0x7e => self.ror(&opcode.mode),
                 0xe6 | 0xf6 | 0xee | 0xfe => self.inc(&opcode.mode),
                 0x86 | 0x96 | 0x8e => self.stx(&opcode.mode),
                 0x84 | 0x94 | 0x8c => self.sty(&opcode.mode),
+                0x0a => self.asl_accumulator(),
+                0x4a => self.lsr_accumulator(),
+                0x2a => self.rol_accumulator(),
+                0x6a => self.ror_accumulator(),
                 0xe8 => self.inx(),
                 0xc8 => self.iny(),
                 0xaa => self.tax(),
@@ -337,17 +452,51 @@ mod test {
     }
 
     #[test]
-    fn test_adc_flags() {
+    fn test_adc_overflow() {
         let mut cpu = CPU::new();
         cpu.load_and_run(vec![0xa9, 0x80, 0x69, 0x80, 0x00]);
+        assert_eq!(cpu.register_a, 0x00);
         assert!(cpu.status.contains(CpuFlags::CARRY));
         assert!(cpu.status.contains(CpuFlags::ZERO));
         assert!(cpu.status.contains(CpuFlags::OVERFLOW));
         assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
         cpu.load_and_run(vec![0xa9, 0x7f, 0x69, 0x7f, 0x00]);
+        assert_eq!(cpu.register_a, 0xfe);
         assert!(!cpu.status.contains(CpuFlags::CARRY));
         assert!(!cpu.status.contains(CpuFlags::ZERO));
         assert!(cpu.status.contains(CpuFlags::OVERFLOW));
         assert!(cpu.status.contains(CpuFlags::NEGATIVE));
+    }
+
+    #[test]
+    fn test_asl() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa9, 0xff, 0x0a, 0x00]);
+        assert_eq!(cpu.register_a, 0xfe);
+        assert!(cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_lsr() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa9, 0xff, 0x4a, 0x00]);
+        assert_eq!(cpu.register_a, 0x7f);
+        assert!(cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_rol() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa9, 0xff, 0x0a, 0x2a, 0x00]);
+        assert_eq!(cpu.register_a, 0b1111_1101);
+        assert!(cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_ror() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa9, 0xff, 0x4a, 0x6a, 0x00]);
+        assert_eq!(cpu.register_a, 0b1011_1111);
+        assert!(cpu.status.contains(CpuFlags::CARRY));
     }
 }
