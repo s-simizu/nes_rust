@@ -247,6 +247,17 @@ impl CPU {
         self.update_zero_and_negative_falgs(self.mem_read(addr));
     }
 
+    fn branch(&mut self, condition: bool) {
+        if !condition {
+            return;
+        }
+        let offset = self.mem_read(self.program_counter);
+        self.program_counter = self
+            .program_counter
+            .wrapping_add(1)
+            .wrapping_add(offset as u16);
+    }
+
     fn adjust_carry_flag(&mut self, carry: bool) {
         if carry {
             self.status.insert(CpuFlags::CARRY);
@@ -330,6 +341,14 @@ impl CPU {
                 0x8a => self.txa(),
                 0xa8 => self.tay(),
                 0x98 => self.tya(),
+                0xb0 => self.branch(self.status.contains(CpuFlags::CARRY)),
+                0x90 => self.branch(!self.status.contains(CpuFlags::CARRY)),
+                0xf0 => self.branch(self.status.contains(CpuFlags::ZERO)),
+                0xd0 => self.branch(!self.status.contains(CpuFlags::ZERO)),
+                0x30 => self.branch(self.status.contains(CpuFlags::NEGATIVE)),
+                0x10 => self.branch(!self.status.contains(CpuFlags::NEGATIVE)),
+                0x70 => self.branch(self.status.contains(CpuFlags::OVERFLOW)),
+                0x50 => self.branch(!self.status.contains(CpuFlags::OVERFLOW)),
                 0xea => { /* nop */ }
                 0x00 => return,
                 _ => todo!(),
