@@ -247,11 +247,37 @@ impl CPU {
         self.update_zero_and_negative_falgs(self.mem_read(addr));
     }
 
+    fn bit(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        // if value & 0b0100_0000 != 0 {
+        //     self.status.insert(CpuFlags::OVERFLOW);
+        // } else {
+        //     self.status.remove(CpuFlags::OVERFLOW);
+        // }
+        // if value & 0b1000_0000 != 0 {
+        //     self.status.insert(CpuFlags::NEGATIVE);
+        // } else {
+        //     self.status.remove(CpuFlags::NEGATIVE);
+        // }
+        self.change_flag(value & 0b0100_0000 != 0, CpuFlags::OVERFLOW);
+        self.change_flag(value & 0b1000_0000 != 0, CpuFlags::NEGATIVE);
+        self.change_flag(value & self.register_a == 0, CpuFlags::ZERO);
+    }
+
     fn adjust_carry_flag(&mut self, carry: bool) {
         if carry {
             self.status.insert(CpuFlags::CARRY);
         } else {
             self.status.remove(CpuFlags::CARRY);
+        }
+    }
+
+    fn change_flag(&mut self, condition: bool, flag: CpuFlags) {
+        if condition {
+            self.status.insert(flag);
+        } else {
+            self.status.remove(flag);
         }
     }
 
