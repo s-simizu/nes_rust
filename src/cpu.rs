@@ -14,12 +14,16 @@ bitflags! {
     }
 }
 
+const STACK: u16 = 0x0100;
+const STACK_RESET: u8 = 0xfd;
+
 pub struct CPU {
     pub register_a: u8,
     pub register_x: u8,
     pub register_y: u8,
     pub status: CpuFlags,
     pub program_counter: u16,
+    pub stack_pointer: u8,
     pub memory: [u8; 0xFFFF],
 }
 
@@ -44,6 +48,7 @@ impl CPU {
             register_a: 0,
             register_x: 0,
             register_y: 0,
+            stack_pointer: STACK_RESET,
             status: CpuFlags::from_bits_truncate(0b00100100),
             program_counter: 0,
             memory: [0; 0xFFFF],
@@ -175,7 +180,7 @@ impl CPU {
 
     fn asl_accumulator(&mut self) {
         let shifted = (self.register_a as u16) << 1;
-        self.adjust_carry_flag(shifted > 0xff);
+        self.status.set(CpuFlags::CARRY, shifted > 0xff);
         self.register_a = shifted as u8;
         self.update_zero_and_negative_falgs(self.register_a);
     }
@@ -183,13 +188,13 @@ impl CPU {
     fn asl(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let shifted = (self.mem_read(addr) as u16) << 1;
-        self.adjust_carry_flag(shifted > 0xff);
+        self.status.set(CpuFlags::CARRY, shifted > 0xff);
         self.mem_write(addr, shifted as u8);
         self.update_zero_and_negative_falgs(self.mem_read(addr));
     }
 
     fn lsr_accumulator(&mut self) {
-        self.adjust_carry_flag(self.register_a & 1 == 1);
+        self.status.set(CpuFlags::CARRY, self.register_a & 1 == 1);
         self.register_a >>= 1;
         self.update_zero_and_negative_falgs(self.register_a);
     }
@@ -197,7 +202,7 @@ impl CPU {
     fn lsr(&mut self, mode: &AddressingMode) {
         let addr = self.get_operand_address(mode);
         let value = self.mem_read(addr);
-        self.adjust_carry_flag(value & 1 == 1);
+        self.status.set(CpuFlags::CARRY, value & 1 == 1);
         self.mem_write(addr, value >> 1);
         self.update_zero_and_negative_falgs(self.mem_read(addr));
     }
@@ -205,7 +210,7 @@ impl CPU {
     fn rol_accumulator(&mut self) {
         let old_carry = self.status.contains(CpuFlags::CARRY);
         let mut shifted = (self.register_a as u16) << 1;
-        self.adjust_carry_flag(shifted > 0xff);
+        self.status.set(CpuFlags::CARRY, shifted > 0xff);
         if old_carry {
             shifted |= 1;
         }
@@ -217,7 +222,7 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let old_carry = self.status.contains(CpuFlags::CARRY);
         let mut shifted = (self.register_a as u16) << 1;
-        self.adjust_carry_flag(shifted > 0xff);
+        self.status.set(CpuFlags::CARRY, shifted > 0xff);
         if old_carry {
             shifted |= 1;
         }
@@ -227,7 +232,7 @@ impl CPU {
 
     fn ror_accumulator(&mut self) {
         let old_carry = self.status.contains(CpuFlags::CARRY);
-        self.adjust_carry_flag(self.register_a & 1 == 1);
+        self.status.set(CpuFlags::CARRY, self.register_a & 1 == 1);
         self.register_a >>= 1;
         if old_carry {
             self.register_a |= 0b1000_0000;
@@ -239,7 +244,7 @@ impl CPU {
         let addr = self.get_operand_address(mode);
         let old_carry = self.status.contains(CpuFlags::CARRY);
         let mut value = self.mem_read(addr);
-        self.adjust_carry_flag(value & 1 == 1);
+        self.status.set(CpuFlags::CARRY, value & 1 == 1);
         if old_carry {
             value |= 0b1000_0000;
         }
@@ -258,12 +263,12 @@ impl CPU {
             .wrapping_add(offset as u16);
     }
 
-    fn adjust_carry_flag(&mut self, carry: bool) {
-        if carry {
-            self.status.insert(CpuFlags::CARRY);
-        } else {
-            self.status.remove(CpuFlags::CARRY);
-        }
+    fn bit(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let value = self.mem_read(addr);
+        self.status.set(CpuFlags::OVERFLOW, value & 0b0100_0000 != 0);
+        self.status.set(CpuFlags::NEGATIVE, value & 0b1000_0000 != 0);
+        self.status.set(CpuFlags::ZERO, value & self.register_a == 0);
     }
 
     fn add_to_register_a(&mut self, data: u8) -> u8 {
@@ -275,31 +280,18 @@ impl CPU {
                 0
             };
         let carry = sum > 0xff;
-        self.adjust_carry_flag(carry);
+        self.status.set(CpuFlags::CARRY, carry);
         let result = sum as u8;
         let is_same_sign = !(self.register_a ^ data) >> 7 & 1 == 1;
         let is_wrong_result = (sum >> 7 & 1 == 1) ^ carry;
         let overflow = is_same_sign && is_wrong_result;
-        if overflow {
-            self.status.insert(CpuFlags::OVERFLOW);
-        } else {
-            self.status.remove(CpuFlags::OVERFLOW);
-        }
+        self.status.set(CpuFlags::OVERFLOW, overflow);
         result
     }
 
     fn update_zero_and_negative_falgs(&mut self, result: u8) {
-        if result == 0 {
-            self.status.insert(CpuFlags::ZERO);
-        } else {
-            self.status.remove(CpuFlags::ZERO);
-        }
-
-        if result & 0b1000_0000 != 0 {
-            self.status.insert(CpuFlags::NEGATIVE);
-        } else {
-            self.status.remove(CpuFlags::NEGATIVE);
-        }
+        self.status.set(CpuFlags::ZERO, result == 0);
+        self.status.set(CpuFlags::NEGATIVE, result & 0b1000_0000 != 0);
     }
 
     pub fn run(&mut self) {
@@ -331,6 +323,7 @@ impl CPU {
                 0xe6 | 0xf6 | 0xee | 0xfe => self.inc(&opcode.mode),
                 0x86 | 0x96 | 0x8e => self.stx(&opcode.mode),
                 0x84 | 0x94 | 0x8c => self.sty(&opcode.mode),
+                0x24 | 0x2c => self.bit(&opcode.mode),
                 0x0a => self.asl_accumulator(),
                 0x4a => self.lsr_accumulator(),
                 0x2a => self.rol_accumulator(),
@@ -517,5 +510,20 @@ mod test {
         cpu.load_and_run(vec![0xa9, 0xff, 0x4a, 0x6a, 0x00]);
         assert_eq!(cpu.register_a, 0b1011_1111);
         assert!(cpu.status.contains(CpuFlags::CARRY));
+    }
+
+    #[test]
+    fn test_bit() {
+        let mut cpu = CPU::new();
+        cpu.mem_write(0x10, 0xff);
+        cpu.load_and_run(vec![0xa9, 0xff, 0x24, 0x10, 0x00]);
+        assert!(!cpu.status.contains(CpuFlags::ZERO));
+        assert!(cpu.status.contains(CpuFlags::OVERFLOW));
+        assert!(cpu.status.contains(CpuFlags::NEGATIVE));
+        cpu.mem_write(0x10, 0x00);
+        cpu.load_and_run(vec![0xa9, 0xff, 0x24, 0x10, 0x00]);
+        assert!(cpu.status.contains(CpuFlags::ZERO));
+        assert!(!cpu.status.contains(CpuFlags::OVERFLOW));
+        assert!(!cpu.status.contains(CpuFlags::NEGATIVE));
     }
 }
