@@ -1,5 +1,5 @@
 use crate::opcodes;
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Add};
 
 bitflags! {
     pub struct CpuFlags: u8 {
@@ -271,6 +271,18 @@ impl CPU {
         self.status.set(CpuFlags::ZERO, value & self.register_a == 0);
     }
 
+    fn cmp(&mut self, mode: &AddressingMode) {
+        todo!();
+    }
+
+    fn cpx(&mut self, mode: &AddressingMode) {
+        todo!();
+    }
+
+    fn cpy(&mut self, mode: &AddressingMode) {
+        todo!();
+    }
+
     fn add_to_register_a(&mut self, data: u8) -> u8 {
         let sum = self.register_a as u16
             + data as u16
@@ -313,6 +325,7 @@ impl CPU {
                 0x29 | 0x25 | 0x35 | 0x2d | 0x3d | 0x39 | 0x21 | 0x31 => self.and(&opcode.mode),
                 0x09 | 0x05 | 0x15 | 0x0d | 0x1d | 0x19 | 0x01 | 0x11 => self.ora(&opcode.mode),
                 0x49 | 0x45 | 0x55 | 0x4d | 0x5d | 0x59 | 0x41 | 0x51 => self.eor(&opcode.mode),
+                0xc9 | 0xc5 | 0xd5 | 0xcd | 0xdd | 0xd9 | 0xc1 | 0xd1 => self.cmp(&opcode.mode),
                 0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => self.sta(&opcode.mode),
                 0xa2 | 0xa6 | 0xb6 | 0xae | 0xbe => self.ldx(&opcode.mode),
                 0xa0 | 0xa4 | 0xb4 | 0xac | 0xbc => self.ldy(&opcode.mode),
@@ -323,6 +336,8 @@ impl CPU {
                 0xe6 | 0xf6 | 0xee | 0xfe => self.inc(&opcode.mode),
                 0x86 | 0x96 | 0x8e => self.stx(&opcode.mode),
                 0x84 | 0x94 | 0x8c => self.sty(&opcode.mode),
+                0xe0 | 0xe4 | 0xec => self.cpx(&opcode.mode),
+                0xc0 | 0xc4 | 0xcc => self.cpy(&opcode.mode),
                 0x24 | 0x2c => self.bit(&opcode.mode),
                 0x0a => self.asl_accumulator(),
                 0x4a => self.lsr_accumulator(),
@@ -342,6 +357,13 @@ impl CPU {
                 0x10 => self.branch(!self.status.contains(CpuFlags::NEGATIVE)),
                 0x70 => self.branch(self.status.contains(CpuFlags::OVERFLOW)),
                 0x50 => self.branch(!self.status.contains(CpuFlags::OVERFLOW)),
+                0x38 => self.status.insert(CpuFlags::CARRY),
+                0xf8 => self.status.insert(CpuFlags::DECIMAL_MODE),
+                0x78 => self.status.insert(CpuFlags::INTERRUPT_DISABLE),
+                0x18 => self.status.remove(CpuFlags::CARRY),
+                0xd8 => self.status.remove(CpuFlags::DECIMAL_MODE),
+                0x58 => self.status.remove(CpuFlags::INTERRUPT_DISABLE),
+                0xb8 => self.status.remove(CpuFlags::OVERFLOW),
                 0xea => { /* nop */ }
                 0x00 => return,
                 _ => todo!(),
